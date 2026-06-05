@@ -21,7 +21,8 @@ class Dijkstra:
         criterion: str = "distancia",
         budget: float = math.inf,
         time_limit_min: float = math.inf,
-        include_secondary: bool = True
+        include_secondary: bool = True,
+        allowed_aircraft: list = None
     ) -> dict:
         # Runs Dijkstra from origin to destination; returns result dict
         self._validate_inputs(origin_id, destination_id, criterion)
@@ -30,6 +31,7 @@ class Dijkstra:
         dist       = {v: math.inf for v in ids}
         cost_acc   = {v: math.inf for v in ids}   # accumulated USD cost
         time_acc   = {v: math.inf for v in ids}   # accumulated time in minutes
+        km_acc     = {v: math.inf for v in ids}   # accumulated distance in km (always tracked)
         pred       = {v: None     for v in ids}
         aircraft   = {v: None     for v in ids}   # aircraft chosen on edge into v
         no_visited = set(ids)
@@ -37,6 +39,7 @@ class Dijkstra:
         dist[origin_id]      = 0
         cost_acc[origin_id]  = 0
         time_acc[origin_id]  = 0
+        km_acc[origin_id]    = 0
 
         while no_visited:
             u = self._pick_min(no_visited, dist)
@@ -55,7 +58,9 @@ class Dijkstra:
                 if not include_secondary and not arista.vertice_destino.is_hub:
                     continue
 
-                option         = self._best_option(arista, criterion)
+                option = self._best_option(arista, criterion, allowed_aircraft)
+                if option is None:
+                    continue   # no aircraft on this edge matches the filter
                 edge_weight    = option["weight"]
                 edge_cost      = option["cost_usd"]
                 edge_time      = option["time_min"]
@@ -72,28 +77,34 @@ class Dijkstra:
                     dist[v]     = new_dist
                     cost_acc[v] = new_cost
                     time_acc[v] = new_time
+                    km_acc[v]   = km_acc[u] + arista.distance_km   # track km of best path
                     pred[v]     = u
                     aircraft[v] = option["aircraft"]
 
         path = self._reconstruct_path(pred, origin_id, destination_id)
         return {
-            "path":         path,
-            "dist":         dist,
-            "cost_acc":     cost_acc,
-            "time_acc":     time_acc,
-            "pred":         pred,
-            "aircraft":     aircraft,
-            "total_weight": dist[destination_id],
-            "total_cost":   cost_acc[destination_id],
-            "total_time":   time_acc[destination_id],
-            "reachable":    dist[destination_id] < math.inf
+            "path":           path,
+            "dist":           dist,
+            "cost_acc":       cost_acc,
+            "time_acc":       time_acc,
+            "pred":           pred,
+            "aircraft":       aircraft,
+            "total_weight":   dist[destination_id],
+            "total_cost":     cost_acc[destination_id],
+            "total_time":     time_acc[destination_id],
+            "total_dist_km":  km_acc[destination_id],   # km of the chosen path regardless of criterion
+            "reachable":      dist[destination_id] < math.inf
         }
 
     # --- Weight selection per criterion ---
 
-    def _best_option(self, arista, criterion: str) -> dict:
+    def _best_option(self, arista, criterion: str, allowed_aircraft: list = None) -> dict:
         # Returns the aircraft option that minimizes the given criterion
         options = arista.get_options()
+        if allowed_aircraft:
+            options = [o for o in options if o["aircraft"] in allowed_aircraft]
+        if not options:
+            return None   # no valid aircraft for this edge under current filter
         if criterion == "costo":
             best = min(options, key=lambda o: o["cost_usd"])
             return {**best, "weight": best["cost_usd"]}
@@ -147,10 +158,12 @@ class Dijkstra:
         destination_id: str,
         budget: float = math.inf,
         time_limit_min: float = math.inf,
-        include_secondary: bool = True
+        include_secondary: bool = True,
+        allowed_aircraft: list = None
     ) -> dict:
         # Runs Dijkstra once per criterion; returns dict keyed by criterion name
         return {
-            c: self.run(origin_id, destination_id, c, budget, time_limit_min, include_secondary)
+            c: self.run(origin_id, destination_id, c, budget, time_limit_min,
+                        include_secondary, allowed_aircraft)
             for c in CRITERIA
         }

@@ -7,12 +7,15 @@ from models.graph import Grafo
 class JSONLoader:
     # Loads network.json and builds a fully populated Grafo
 
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str = ""):
         self.filepath = filepath
 
     def load(self) -> Grafo:
         # Reads JSON file and returns a constructed Grafo
-        raw = self._read_file()
+        return self.load_from_dict(self._read_file())
+
+    def load_from_dict(self, raw: dict) -> Grafo:
+        # Builds a Grafo from an already-parsed JSON dict (e.g. from an upload)
         grafo = Grafo()
         self._apply_global_config(grafo, raw.get("configuracion", {}))
         self._load_airports(grafo, raw.get("aeropuertos", []))

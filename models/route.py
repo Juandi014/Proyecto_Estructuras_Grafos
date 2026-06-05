@@ -22,7 +22,7 @@ class Arista:
         self.aircraft_types = aircraft_types     # e.g. ["Avión Comercial", "Hélice"]
         self.base_cost = base_cost               # 0 if subsidized route
         self.min_stay_min = min_stay_min         # minimum stay at destination in minutes
-        self.aircraft_rates = aircraft_rates or AIRCRAFT_DEFAULTS
+        self.aircraft_rates = aircraft_rates if aircraft_rates is not None else AIRCRAFT_DEFAULTS
         self.is_blocked = False                  # True when route is interrupted (R4)
 
     def getPeso(self) -> float:
