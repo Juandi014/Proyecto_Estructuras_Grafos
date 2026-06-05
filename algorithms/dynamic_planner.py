@@ -3,6 +3,7 @@ from models.graph import Grafo
 from models.airport import Vertice
 from models.route import Arista
 from algorithms.travel_state import TravelState, Phase
+from algorithms.floyd_warshall import FloydWarshall
 
 
 class DynamicPlanner:
@@ -10,9 +11,16 @@ class DynamicPlanner:
     # Each public method advances the state by one decision and returns
     # the new situation dict so any UI can render it without coupling.
 
-    def __init__(self, grafo: Grafo, origin_id: str, initial_budget: float):
+    def __init__(self, grafo: Grafo, origin_id: str, initial_budget: float,
+                 time_limit_min: float = float("inf")):
         self.grafo   = grafo
-        self.state   = TravelState(origin_id, initial_budget)
+        self._fw     = FloydWarshall(grafo)   # precomputed all-pairs costs for suggestion
+        self.state   = TravelState(
+            origin_id,
+            initial_budget,
+            time_limit_min        = time_limit_min,
+            budget_threshold_pct  = grafo.budget_threshold_pct   # configurable from JSON
+        )
         self._enter_airport(origin_id)   # set up first mandatory checks
 
     # --- Situation query (UI calls this after every action) ---
@@ -33,7 +41,8 @@ class DynamicPlanner:
             return {**base, "food_cost": airport.food_cost}
 
         if self.state.phase == Phase.OPTIONAL_ACTIVITIES:
-            acts = airport.get_optional_activities()
+            acts = [a for a in airport.get_optional_activities()
+                    if a.name not in self.state.done_activities_here]
             return {**base, "activities": [a.to_dict() for a in acts]}
 
         if self.state.phase == Phase.JOBS:
@@ -43,7 +52,7 @@ class DynamicPlanner:
                     "jobs_available": self.state.jobs_available()}
 
         if self.state.phase == Phase.CHOOSE_DESTINATION:
-            options = self._build_destination_options()
+            options    = self._build_destination_options()
             suggestion = self._suggest_next(options)
             return {**base, "destinations": options, "suggestion": suggestion}
 
@@ -51,7 +60,7 @@ class DynamicPlanner:
             arista  = self.state.pending_arista
             options = self._filter_aircraft_options(arista)
             return {**base,
-                    "destination":    self.state.pending_destination.identificador,
+                    "destination":      self.state.pending_destination.identificador,
                     "aircraft_options": options}
 
         if self.state.phase == Phase.IN_TRANSIT:
@@ -90,6 +99,8 @@ class DynamicPlanner:
 
     def do_activity(self, activity_name: str):
         # Performs an optional activity at the current airport
+        if activity_name in self.state.done_activities_here:
+            raise ValueError(f"Activity '{activity_name}' already completed at this stop")
         airport  = self.grafo.get_vertice(self.state.current_id)
         activity = next((a for a in airport.get_optional_activities()
                          if a.name == activity_name), None)
@@ -102,6 +113,7 @@ class DynamicPlanner:
         self.state.log_activity(activity.name, "opcional",
                                 activity.duration_min, activity.cost_usd)
         self.state.advance_time(activity.duration_min)
+        self.state.done_activities_here.add(activity_name)
 
     def skip_activities(self):
         # Skips optional activities and moves to jobs phase
@@ -110,14 +122,14 @@ class DynamicPlanner:
     def do_job(self, job_name: str, hours: float):
         # Works a job at the current airport and earns income
         if not self.state.jobs_available():
-            raise ValueError("Jobs are only available when budget < 35% of initial")
+            raise ValueError("Jobs are only available when budget < threshold of initial")
         airport = self.grafo.get_vertice(self.state.current_id)
         job     = next((j for j in airport.jobs if j.name == job_name), None)
         if job is None:
             raise ValueError(f"Job '{job_name}' not found at {self.state.current_id}")
 
-        hours   = min(hours, job.max_hours)
-        earned  = job.calculate_earnings(hours)
+        hours  = min(hours, job.max_hours)
+        earned = job.calculate_earnings(hours)
         self.state.earn(earned, f"Job: {job_name} ({hours}h)")
         self.state.log_job(job_name, hours, earned)
         self.state.advance_time(hours * 60)
@@ -143,9 +155,14 @@ class DynamicPlanner:
         arista = self.state.pending_arista
         if aircraft_type not in arista.aircraft_types:
             raise ValueError(f"Aircraft '{aircraft_type}' not available on this route")
+        cost     = arista.get_cost(aircraft_type)
+        time_min = arista.get_time(aircraft_type)
+        if cost > self.state.budget:
+            raise ValueError("Insufficient budget for this flight")
+        if self.state.elapsed_min + time_min > self.state.time_limit_min:
+            raise ValueError("This flight would exceed the available time limit")
         if arista.is_subsidized() and not self.state.can_use_subsidized(arista.distance_km):
             raise ValueError("Cannot use this subsidized route: 20% distance limit reached")
-
         self.state.pending_aircraft = aircraft_type
         self.state.phase            = Phase.IN_TRANSIT
 
@@ -168,18 +185,18 @@ class DynamicPlanner:
                 self.state.spend(meal_cost, f"In-flight meal (billed to {self.state.current_id})")
                 self.state.log_activity("Alimentación en vuelo", "obligatoria", 0, meal_cost)
 
+        # Save meal accumulator before advance_time modifies it
+        original_since_meal = self.state.since_meal_min
+
         self.state.spend(cost, f"Flight {self.state.current_id} -> {dest.identificador} ({aircraft})")
         self.state.log_flight(self.state.current_id, dest.identificador,
                               aircraft, arista.distance_km, cost, time_min, subsidized)
         self.state.advance_time(time_min)
         self.state.record_leg(arista.distance_km, subsidized)
 
-        # Reset meal timer by meals paid, then update remaining
-        for _ in range(meals_during):
-            self.state.reset_meal_timer()
-        # Remaining partial time since last meal after flight
+        # Correct since_meal_min: remaining partial time after all mid-flight meals
         self.state.since_meal_min = round(
-            (self.state.since_meal_min) % (self.grafo.food_interval_h * 60), 2)
+            (original_since_meal + time_min) % (self.grafo.food_interval_h * 60), 2)
 
         # Arrive
         self.state.visited.add(dest.identificador)
@@ -190,6 +207,15 @@ class DynamicPlanner:
 
         self._enter_airport(dest.identificador)
 
+    def cancel_flight(self):
+        # Cancels an in-transit leg and returns the traveler to the departure airport
+        if self.state.phase != Phase.IN_TRANSIT:
+            raise ValueError("No active flight to cancel")
+        self.state.pending_destination = None
+        self.state.pending_arista      = None
+        self.state.pending_aircraft    = None
+        self._enter_airport(self.state.current_id)
+
     def end_trip(self):
         # Ends the trip and transitions to TRIP_ENDED phase
         self.state.phase = Phase.TRIP_ENDED
@@ -198,6 +224,7 @@ class DynamicPlanner:
 
     def _enter_airport(self, airport_id: str):
         # Sets the correct phase when arriving at or starting at an airport
+        self.state.done_activities_here = set()
         self.state.phase = self._next_mandatory_or(Phase.OPTIONAL_ACTIVITIES)
 
     def _next_mandatory_or(self, fallback: Phase) -> Phase:
@@ -219,19 +246,22 @@ class DynamicPlanner:
             if not aircraft_opts:
                 continue
             options.append({
-                "airport_id":      dest_id,
-                "distance_km":     arista.distance_km,
-                "subsidized":      arista.is_subsidized(),
-                "min_stay_min":    arista.min_stay_min,
+                "airport_id":       dest_id,
+                "distance_km":      arista.distance_km,
+                "subsidized":       arista.is_subsidized(),
+                "min_stay_min":     arista.min_stay_min,
                 "aircraft_options": aircraft_opts
             })
         return options
 
     def _filter_aircraft_options(self, arista: Arista) -> list:
-        # Returns aircraft options that fit within current budget and distance rules
-        result = []
+        # Returns aircraft options that fit within current budget, time and distance rules
+        result        = []
+        remaining_min = self.state.time_limit_min - self.state.elapsed_min
         for opt in arista.get_options():
             if opt["cost_usd"] > self.state.budget:
+                continue
+            if opt["time_min"] > remaining_min:                          # hard time constraint
                 continue
             if arista.is_subsidized() and not self.state.can_use_subsidized(arista.distance_km):
                 continue
@@ -239,21 +269,19 @@ class DynamicPlanner:
         return result
 
     def _suggest_next(self, destination_options: list) -> str | None:
-        # Greedy suggestion: unvisited airport reachable with most onward connections
+        # Uses Floyd-Warshall to score each candidate by truly reachable unvisited airports
         best_id    = None
         best_score = -1
         for opt in destination_options:
-            dest_id     = opt["airport_id"]
-            cheapest    = min(opt["aircraft_options"], key=lambda o: o["cost_usd"],
-                              default=None)
+            dest_id  = opt["airport_id"]
+            cheapest = min(opt["aircraft_options"], key=lambda o: o["cost_usd"], default=None)
             if cheapest is None:
                 continue
-            remaining_budget = self.state.budget - cheapest["cost_usd"]
-            # Score = number of unvisited airports reachable from this destination
+            remaining = self.state.budget - cheapest["cost_usd"]
+            # Count unvisited airports reachable from dest within remaining budget (multi-hop)
             score = sum(
-                1 for a in self.grafo.get_active_routes(dest_id)
-                if a.vertice_destino.identificador not in self.state.visited
-                and a.get_cheapest_option()["cost_usd"] <= remaining_budget
+                1 for iata in self._fw.reachable_from(dest_id, remaining)
+                if iata not in self.state.visited
             )
             if score > best_score:
                 best_score = score

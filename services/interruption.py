@@ -77,22 +77,23 @@ class InterruptionService:
     ) -> dict:
         # Finds the best alternative route after a blocking event.
         # Returns the new path or signals no alternative exists.
+        remaining_min = state.time_limit_min - state.elapsed_min   # hard time constraint (spec)
         dijkstra = Dijkstra(self.grafo)
         result   = dijkstra.run(
-            origin_id        = state.current_id,
-            destination_id   = destination_id,
-            criterion        = criterion,
-            budget           = state.budget,
-            time_limit_min   = float("inf"),
+            origin_id         = state.current_id,
+            destination_id    = destination_id,
+            criterion         = criterion,
+            budget            = state.budget,
+            time_limit_min    = remaining_min,
             include_secondary = include_secondary
         )
 
         if not result["reachable"]:
             return {
-                "event":       "no_alternative",
-                "from":        state.current_id,
-                "to":          destination_id,
-                "note":        "No viable alternative route within current budget"
+                "event": "no_alternative",
+                "from":  state.current_id,
+                "to":    destination_id,
+                "note":  "No viable alternative route within current budget and time"
             }
 
         return {
@@ -117,8 +118,8 @@ class InterruptionService:
             arista     = self.grafo.get_arista(seg_origin, seg_dest)
             if arista is None or arista.is_blocked:
                 return {
-                    "valid":          False,
-                    "blocked_leg":    f"{seg_origin} -> {seg_dest}",
-                    "leg_index":      i
+                    "valid":       False,
+                    "blocked_leg": f"{seg_origin} -> {seg_dest}",
+                    "leg_index":   i
                 }
         return {"valid": True, "blocked_leg": None, "leg_index": None}

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SkyRoute Planner</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+</head>
+<body>
+
+<!-- ── Upload overlay ───────────────────────────────────────────────────────── -->
+<div id="upload-overlay">
+  <div id="upload-card">
+    <div class="upload-logo">Sky<span>Route</span></div>
+    <p class="upload-subtitle">Load a network JSON file to get started</p>
+
+    <div id="drop-zone">
+      <div class="drop-icon">&#8679;</div>
+      <p class="drop-label">Drop JSON file here</p>
+      <p class="drop-sublabel">or</p>
+      <label for="json-file-input" class="btn btn-ghost">Browse files</label>
+      <input type="file" id="json-file-input" accept=".json" style="display:none">
+    </div>
+
+    <button id="upload-load-btn" class="btn btn-primary btn-block" disabled>Load File</button>
+
+    <div class="upload-divider"><span>or</span></div>
+
+    <button id="use-default-btn" class="btn btn-ghost btn-block">Use default network (data/network.json)</button>
+    <p id="upload-status" class="upload-status"></p>
+  </div>
+</div>
+
+<div id="app">
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <header id="header">
+    <h1>Sky<span>Route</span></h1>
+    <div class="header-stats">
+      <div class="stat-chip">Airports: <b id="stat-airports">—</b></div>
+      <div class="stat-chip">Routes: <b id="stat-routes">—</b></div>
+      <div class="stat-chip" style="color:var(--blocked-color)">Blocked: <b id="stat-blocked">0</b></div>
+    </div>
+    <button class="btn btn-ghost btn-sm" style="margin-left:12px" onclick="App.showUpload()">Load JSON</button>
+  </header>
+
+  <!-- ── Left panel ─────────────────────────────────────────────────────── -->
+  <aside id="panel-left" class="tab-panel-root">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="tab-info">Info</button>
+      <button class="tab-btn" data-tab="tab-r2">Route</button>
+      <button class="tab-btn" data-tab="tab-coverage">Coverage</button>
+    </div>
+
+    <!-- Info tab -->
+    <div id="tab-info" class="tab-content active">
+      <p class="section-label">Click a node to inspect</p>
+      <div id="airport-info">
+        <div class="info-card" style="color:var(--text-faint);font-size:11px;text-align:center;padding:24px">
+          Select any airport on the map
+        </div>
+      </div>
+    </div>
+
+    <!-- R2 route tab -->
+    <div id="tab-r2" class="tab-content">
+      <p class="section-label">Best Route</p>
+      <div class="field">
+        <label>Origin</label>
+        <select id="r2-origin" class="airport-select"></select>
+      </div>
+      <div class="field">
+        <label>Destination</label>
+        <select id="r2-dest" class="airport-select"></select>
+      </div>
+      <div class="field">
+        <label>Budget (USD)</label>
+        <input type="number" id="r2-budget" placeholder="∞" min="0">
+      </div>
+      <div class="field">
+        <label>Time limit (hours)</label>
+        <input type="number" id="r2-time" placeholder="∞" min="0">
+      </div>
+      <div class="field">
+        <label>Criteria</label>
+        <div class="checkbox-group">
+          <label class="checkbox-row"><input type="checkbox" class="r2-criterion" value="distancia" checked> Distance</label>
+          <label class="checkbox-row"><input type="checkbox" class="r2-criterion" value="costo" checked> Cost (USD)</label>
+          <label class="checkbox-row"><input type="checkbox" class="r2-criterion" value="tiempo"> Time</label>
+        </div>
+      </div>
+      <div class="field">
+        <label>Transport types</label>
+        <div class="checkbox-group">
+          <label class="checkbox-row"><input type="checkbox" class="r2-aircraft" value="Avión Comercial" checked> Commercial</label>
+          <label class="checkbox-row"><input type="checkbox" class="r2-aircraft" value="Avión Regional" checked> Regional</label>
+          <label class="checkbox-row"><input type="checkbox" class="r2-aircraft" value="Hélice" checked> Propeller</label>
+        </div>
+      </div>
+      <label class="checkbox-row"><input type="checkbox" id="r2-secondary" checked> Include secondary airports</label>
+      <button class="btn btn-primary btn-block" onclick="runRoute()">Calculate Route</button>
+      <div id="r2-results" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div>
+
+    <!-- Coverage tab -->
+    <div id="tab-coverage" class="tab-content">
+      <p class="section-label">Max Destinations</p>
+      <div class="field">
+        <label>Origin</label>
+        <select id="cov-origin" class="airport-select"></select>
+      </div>
+      <div class="field">
+        <label>Budget (USD)</label>
+        <input type="number" id="cov-budget" placeholder="e.g. 1500" min="0">
+      </div>
+      <div class="field">
+        <label>Time limit (hours)</label>
+        <input type="number" id="cov-time" placeholder="e.g. 48" min="0">
+      </div>
+      <div class="field">
+        <label>Transport types</label>
+        <div class="checkbox-group">
+          <label class="checkbox-row"><input type="checkbox" class="cov-aircraft" value="Avión Comercial" checked> Commercial</label>
+          <label class="checkbox-row"><input type="checkbox" class="cov-aircraft" value="Avión Regional" checked> Regional</label>
+          <label class="checkbox-row"><input type="checkbox" class="cov-aircraft" value="Hélice" checked> Propeller</label>
+        </div>
+      </div>
+      <label class="checkbox-row"><input type="checkbox" id="cov-secondary" checked> Include secondary airports</label>
+      <button class="btn btn-primary btn-block" onclick="runCoverage()">Find Coverage</button>
+      <div id="cov-results" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div>
+  </aside>
+
+  <!-- ── Graph ──────────────────────────────────────────────────────────── -->
+  <main id="graph-wrap">
+    <div id="cy"></div>
+
+    <!-- Graph controls -->
+    <div id="graph-controls">
+      <button class="btn btn-ghost btn-sm" onclick="Graph.fitAll()" title="Fit all">⊡</button>
+      <button class="btn btn-ghost btn-sm" onclick="Graph.zoomIn()"  title="Zoom in">+</button>
+      <button class="btn btn-ghost btn-sm" onclick="Graph.zoomOut()" title="Zoom out">−</button>
+    </div>
+
+    <!-- Legend -->
+    <div id="graph-legend">
+      <div class="legend-item"><span class="legend-dot hub"></span>Hub</div>
+      <div class="legend-item"><span class="legend-dot sec"></span>Secondary</div>
+      <div class="legend-item"><span class="legend-line path"></span>Route</div>
+      <div class="legend-item"><span class="legend-line subsidized"></span>Subsidized</div>
+      <div class="legend-item"><span class="legend-line blocked"></span>Blocked</div>
+    </div>
+  </main>
+
+  <!-- ── Right panel ────────────────────────────────────────────────────── -->
+  <aside id="panel-right" class="tab-panel-root">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="tab-advanced">Trip</button>
+      <button class="tab-btn" data-tab="tab-interrupt">Interrupt</button>
+      <button class="tab-btn" data-tab="tab-report">Report</button>
+    </div>
+
+    <!-- Advanced planner tab -->
+    <div id="tab-advanced" class="tab-content active">
+      <!-- Start form -->
+      <div id="adv-start-form">
+        <p class="section-label">Dynamic Trip Planning</p>
+        <div class="field">
+          <label>Origin</label>
+          <select id="adv-origin" class="airport-select"></select>
+        </div>
+        <div class="field">
+          <label>Initial Budget (USD)</label>
+          <input type="number" id="adv-budget" placeholder="e.g. 1200" min="0">
+        </div>
+        <button class="btn btn-primary btn-block" onclick="startAdvanced()">Start Trip ✈</button>
+      </div>
+      <!-- Active session -->
+      <div id="adv-session" style="display:none;flex-direction:column;gap:10px">
+        <div id="adv-situation"></div>
+        <div id="adv-log" class="log-feed" style="margin-top:4px"></div>
+      </div>
+    </div>
+
+    <!-- Interruptions tab -->
+    <div id="tab-interrupt" class="tab-content">
+      <p class="section-label">Block / Unblock Route</p>
+      <div class="field">
+        <label>Origin</label>
+        <select id="int-origin" class="airport-select"></select>
+      </div>
+      <div class="field">
+        <label>Destination</label>
+        <select id="int-dest" class="airport-select"></select>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-warn btn-block" onclick="blockRoute()">Block ✕</button>
+        <button class="btn btn-ghost btn-block" onclick="unblockRoute()">Restore ✓</button>
+      </div>
+
+      <div style="margin-top:16px">
+        <p class="section-label">Recalculate for active trip</p>
+        <div class="field">
+          <label>Destination goal</label>
+          <select id="int-goal" class="airport-select"></select>
+        </div>
+        <button class="btn btn-primary btn-block" onclick="recalculate()">Recalculate Route</button>
+      </div>
+    </div>
+
+    <!-- Report tab -->
+    <div id="tab-report" class="tab-content">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <p class="section-label">Trip Report</p>
+        <button class="btn btn-ghost btn-sm" onclick="loadReport()">Refresh</button>
+      </div>
+      <div id="report-content" style="display:flex;flex-direction:column;gap:14px">
+        <p style="font-size:11px;color:var(--text-faint);text-align:center;padding:24px">
+          Complete a trip to see the report
+        </p>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/graph.js"></script>
+<script src="/static/js/planner.js"></script>
+</body>
+</html>

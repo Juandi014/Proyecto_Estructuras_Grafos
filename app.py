@@ -47,6 +47,32 @@ def index():
     # Serves the single-page application
     return render_template("index.html")
 
+@app.route("/api/load-graph", methods=["POST"])
+def upload_graph():
+    # Accepts a JSON file upload and replaces the active graph
+    global grafo, interruption_svc, _planner_sessions
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+    f = request.files["file"]
+    if not f.filename.lower().endswith(".json"):
+        return jsonify({"error": "File must be a .json file"}), 400
+    try:
+        raw = json.load(f.stream)
+    except json.JSONDecodeError as e:
+        return jsonify({"error": f"Invalid JSON: {e}"}), 400
+    try:
+        new_grafo = JSONLoader().load_from_dict(raw)
+    except (KeyError, ValueError) as e:
+        return jsonify({"error": f"Invalid graph structure: {e}"}), 400
+    grafo = new_grafo
+    interruption_svc = InterruptionService(grafo)
+    _planner_sessions.clear()
+    return jsonify({
+        "ok": True,
+        "airports": len(grafo.vertices),
+        "routes": sum(len(v.adyacencias) for v in grafo.vertices),
+    })
+
 # ─────────────────────────────────────────────────────────────────────────────
 # R1 — Graph data
 # ─────────────────────────────────────────────────────────────────────────────
@@ -117,14 +143,20 @@ def plan_route():
     destination = body.get("destination", "").upper()
     criteria   = body.get("criteria", ["distancia"])
     budget     = float(body.get("budget", float("inf")))
-    time_limit = float(body.get("time_limit_min", float("inf")))
+    raw_time   = body.get("time_limit_min")
+    time_limit = float(raw_time) if raw_time is not None else float("inf")
     inc_sec    = body.get("include_secondary", True)
+
+    allowed_ac = body.get("allowed_aircraft") or None
+    if allowed_ac is not None and len(allowed_ac) == 0:
+        return jsonify({"error": "Select at least one transport type"}), 400
 
     dk      = Dijkstra(grafo)
     results = {}
     for c in criteria:
         try:
-            results[c] = dk.run(origin, destination, c, budget, time_limit, inc_sec)
+            results[c] = dk.run(origin, destination, c, budget, time_limit,
+                                inc_sec, allowed_ac)
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
     return jsonify(results)
@@ -135,15 +167,17 @@ def plan_coverage():
     # Body: { origin, budget, time_limit_min, allowed_aircraft[], include_secondary }
     body       = request.get_json()
     origin     = body.get("origin", "").upper()
-    budget     = float(body.get("budget", 0))
-    time_limit = float(body.get("time_limit_min", float("inf")))
+    raw_budget = body.get("budget")
+    budget     = float(raw_budget) if raw_budget is not None else 0.0
+    raw_time2  = body.get("time_limit_min")
+    time_limit = float(raw_time2) if raw_time2 is not None else float("inf")
     allowed_ac = body.get("allowed_aircraft") or None
     inc_sec    = body.get("include_secondary", True)
 
     dfs = DFSCoverage(grafo)
     try:
-        by_budget = dfs.run_max_by_budget(origin, budget, allowed_ac, inc_sec)
-        by_time   = dfs.run_max_by_time(origin, time_limit, allowed_ac, inc_sec)
+        by_budget = dfs.run_max_by_budget(origin, budget, time_limit, allowed_ac, inc_sec)
+        by_time   = dfs.run_max_by_time(origin, time_limit, budget, allowed_ac, inc_sec)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -156,13 +190,15 @@ def plan_coverage():
 @app.route("/api/plan/advanced/start", methods=["POST"])
 def advanced_start():
     # Creates a new dynamic planner session
-    # Body: { origin, initial_budget }
-    body    = request.get_json()
-    origin  = body.get("origin", "").upper()
-    budget  = float(body.get("initial_budget", 0))
+    # Body: { origin, initial_budget, time_limit_min? }
+    body       = request.get_json()
+    origin     = body.get("origin", "").upper()
+    budget     = float(body.get("initial_budget", 0))
+    raw_adv    = body.get("time_limit_min")
+    time_limit = float(raw_adv) if raw_adv is not None else float("inf")
 
     try:
-        planner = DynamicPlanner(grafo, origin, budget)
+        planner = DynamicPlanner(grafo, origin, budget, time_limit_min=time_limit)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -237,15 +273,23 @@ def interrupt_route():
 
     result = {"event": event}
 
-    # If traveler is in-transit on this exact leg, redirect to origin
+    # If traveler is in-transit on this exact leg, cancel flight and redirect to origin
     sid = body.get("session_id")
     if sid:
         planner = _get_session(sid)
         if planner and planner.state.phase == Phase.IN_TRANSIT:
             pend_dest = planner.state.pending_destination
             if pend_dest and pend_dest.identificador == dest and planner.state.current_id == origin:
-                interrupt_event = interruption_svc.interrupt_in_transit(planner.state)
-                result["in_transit_interrupt"] = interrupt_event
+                # Log interruption before cancelling so R5 report captures the event
+                planner.state.log.append({
+                    "type":        "interruption",
+                    "origin":      origin,
+                    "destination": dest,
+                    "note":        "Route blocked mid-flight — returned to origin"
+                })
+                planner.cancel_flight()
+                result["in_transit_interrupt"] = {"redirected_to": origin,
+                                                  "blocked_route":  f"{origin}→{dest}"}
                 result["situation"] = planner.get_situation()
 
     return jsonify(result)
@@ -313,6 +357,8 @@ def _dispatch_action(planner: DynamicPlanner, action: str, body: dict):
         planner.choose_aircraft(body["aircraft_type"])
     elif action == "complete_flight":
         planner.complete_flight()
+    elif action == "cancel_flight":
+        planner.cancel_flight()
     elif action == "end_trip":
         planner.end_trip()
     else:

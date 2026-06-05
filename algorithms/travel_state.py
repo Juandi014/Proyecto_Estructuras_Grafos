@@ -17,11 +17,15 @@ class Phase(Enum):
 class TravelState:
     # Holds all mutable state for the traveler's dynamic trip
 
-    def __init__(self, origin_id: str, initial_budget: float):
-        self.origin_id        = origin_id
-        self.current_id       = origin_id
-        self.initial_budget   = initial_budget
-        self.budget           = initial_budget
+    def __init__(self, origin_id: str, initial_budget: float,
+                 time_limit_min: float = float("inf"),
+                 budget_threshold_pct: float = 0.35):
+        self.origin_id            = origin_id
+        self.current_id           = origin_id
+        self.initial_budget       = initial_budget
+        self.budget               = initial_budget
+        self.time_limit_min       = time_limit_min       # hard time cap (minutes)
+        self.budget_threshold_pct = budget_threshold_pct  # configurable job-offer threshold
 
         # Time trackers (minutes)
         self.elapsed_min          = 0.0
@@ -41,14 +45,17 @@ class TravelState:
         # Phase
         self.phase = Phase.OPTIONAL_ACTIVITIES
 
+        # Activities already done at the current airport stop (reset on arrival)
+        self.done_activities_here: set = set()
+
         # Log — all decisions recorded here for the final report
         self.log: list[dict] = []
 
     # --- Budget helpers ---
 
     def jobs_available(self) -> bool:
-        # Returns True when budget has dropped below the threshold
-        return self.budget < self.initial_budget * 0.35
+        # Returns True when budget drops below the configurable threshold (default 35%)
+        return self.budget < self.initial_budget * self.budget_threshold_pct
 
     def spend(self, amount: float, reason: str):
         # Deducts amount from budget and logs the expense
@@ -150,15 +157,18 @@ class TravelState:
 
     def summary(self) -> dict:
         # Returns a summary snapshot of the current travel state
+        inf = float("inf")
         return {
-            "current_airport":  self.current_id,
-            "budget":           self.budget,
-            "initial_budget":   self.initial_budget,
-            "elapsed_h":        round(self.elapsed_min / 60, 2),
-            "since_lodging_h":  round(self.since_lodging_min / 60, 2),
-            "since_meal_h":     round(self.since_meal_min / 60, 2),
-            "visited":          list(self.visited),
-            "total_km":         self.total_km,
-            "subsidized_km":    self.subsidized_km,
-            "phase":            self.phase.value
+            "current_airport":   self.current_id,
+            "budget":            self.budget,
+            "initial_budget":    self.initial_budget,
+            "elapsed_h":         round(self.elapsed_min / 60, 2),
+            "time_limit_h":      round(self.time_limit_min / 60, 2) if self.time_limit_min != inf else None,
+            "time_remaining_h":  round((self.time_limit_min - self.elapsed_min) / 60, 2) if self.time_limit_min != inf else None,
+            "since_lodging_h":   round(self.since_lodging_min / 60, 2),
+            "since_meal_h":      round(self.since_meal_min / 60, 2),
+            "visited":           list(self.visited),
+            "total_km":          self.total_km,
+            "subsidized_km":     self.subsidized_km,
+            "phase":             self.phase.value
         }
