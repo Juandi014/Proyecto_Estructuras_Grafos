@@ -68,7 +68,7 @@ const Graph = (() => {
 
   // ── Highlight path ───────────────────────────────────────────────────────────
 
-  function highlightPath(path, color = '#00d4ff') {
+  function highlightPath(path, color = '#A7727D') {
     _clearHighlight();
     if (!path || path.length < 2) return;
     for (let i = 0; i < path.length; i++) {
@@ -198,50 +198,50 @@ const Graph = (() => {
   function _buildStyle() {
     return [
       { selector: 'node',
-        style: { 'label': 'data(label)', 'width': 36, 'height': 36,
-          'background-color': '#1e2d45', 'border-width': 2, 'border-color': '#2a3f5f',
-          'color': '#7b9fc4', 'font-size': 10, 'font-family': "'Space Mono', monospace",
+        style: { 'label': 'data(label)', 'width': 34, 'height': 34,
+          'background-color': '#EDDBC7', 'border-width': 1.5, 'border-color': '#C4B0A8',
+          'color': '#7A6065', 'font-size': 9, 'font-family': "'Inter', sans-serif",
+          'font-weight': '500',
           'text-valign': 'bottom', 'text-margin-y': 4, 'text-halign': 'center' } },
       { selector: 'node.hub',
-        style: { 'width': 48, 'height': 48, 'background-color': '#0d1f35',
-          'border-color': '#00d4ff', 'border-width': 2.5, 'color': '#00d4ff', 'font-size': 11 } },
+        style: { 'width': 46, 'height': 46, 'background-color': 'rgba(167,114,125,0.15)',
+          'border-color': '#A7727D', 'border-width': 2, 'color': '#A7727D',
+          'font-size': 10, 'font-weight': '600' } },
       { selector: 'node.secondary',
-        style: { 'background-color': '#0d1a28', 'border-color': '#2a3f5f' } },
+        style: { 'background-color': '#F8EAD8', 'border-color': '#C4B0A8' } },
       { selector: 'node.on-path',
-        style: { 'background-color': '#002233', 'border-color': '#00d4ff',
-          'border-width': 3, 'color': '#00d4ff' } },
+        style: { 'background-color': 'rgba(167,114,125,0.2)', 'border-color': '#A7727D',
+          'border-width': 2.5, 'color': '#A7727D' } },
       { selector: 'node.dimmed',
         style: { 'opacity': 0.2 } },
-      // Plane node that flies between airports
       { selector: 'node.flight-node',
-        style: { 'label': '✈', 'width': 24, 'height': 24,
-          'background-color': '#ffe066', 'border-color': '#ffffff', 'border-width': 2,
-          'color': '#ffffff', 'font-size': 14, 'text-valign': 'center', 'text-halign': 'center',
-          'z-index': 999, 'font-family': "'Space Mono', monospace" } },
+        style: { 'label': '✈', 'width': 22, 'height': 22,
+          'background-color': '#C9A96E', 'border-color': '#fff', 'border-width': 2,
+          'color': '#fff', 'font-size': 12, 'text-valign': 'center', 'text-halign': 'center',
+          'z-index': 999, 'font-family': "'Inter', sans-serif" } },
       { selector: 'edge',
-        style: { 'width': 1.2, 'line-color': '#1e2d45', 'target-arrow-color': '#1e2d45',
+        style: { 'width': 1, 'line-color': '#D4C4C0', 'target-arrow-color': '#D4C4C0',
           'target-arrow-shape': 'triangle', 'curve-style': 'bezier',
-          'label': 'data(distance_km)', 'font-size': 8,
-          'font-family': "'Space Mono', monospace", 'color': '#3a4f6a',
-          'text-background-color': '#080c14', 'text-background-opacity': 1,
+          'label': 'data(distance_km)', 'font-size': 7,
+          'font-family': "'Inter', sans-serif", 'color': '#B09BA0',
+          'text-background-color': '#F9F5E7', 'text-background-opacity': 1,
           'text-background-padding': 2, 'text-rotation': 'autorotate' } },
       { selector: 'edge.path-edge',
-        style: { 'width': 3, 'line-color': '#00d4ff', 'target-arrow-color': '#00d4ff',
-          'color': '#00d4ff', 'z-index': 10 } },
-      // Edge currently being flown — yellow dashed
+        style: { 'width': 2.5, 'line-color': '#A7727D', 'target-arrow-color': '#A7727D',
+          'color': '#A7727D', 'z-index': 10 } },
       { selector: 'edge.in-transit',
-        style: { 'line-color': '#ffe066', 'target-arrow-color': '#ffe066',
-          'line-style': 'dashed', 'width': 2.5, 'z-index': 5 } },
+        style: { 'line-color': '#C9A96E', 'target-arrow-color': '#C9A96E',
+          'line-style': 'dashed', 'width': 2, 'z-index': 5 } },
       { selector: 'edge.blocked',
-        style: { 'line-color': '#ff3b5c', 'target-arrow-color': '#ff3b5c',
-          'line-style': 'dashed', 'width': 2 } },
+        style: { 'line-color': '#B85450', 'target-arrow-color': '#B85450',
+          'line-style': 'dashed', 'width': 1.8 } },
       { selector: 'edge.subsidized',
-        style: { 'line-color': '#00e5a0', 'target-arrow-color': '#00e5a0',
+        style: { 'line-color': '#6B9E78', 'target-arrow-color': '#6B9E78',
           'line-style': 'dotted' } },
       { selector: 'edge.dimmed',
         style: { 'opacity': 0.08 } },
       { selector: '.in-transit-pulse',
-        style: { 'border-color': '#00d4ff', 'background-color': '#002233' } },
+        style: { 'border-color': '#A7727D', 'background-color': 'rgba(167,114,125,0.2)' } },
     ];
   }
 
