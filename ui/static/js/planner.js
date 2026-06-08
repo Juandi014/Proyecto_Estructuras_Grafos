@@ -88,6 +88,7 @@ window.App = (() => {
     Graph.load(graphData);
     _updateStats();
     _populateAirportSelects();
+    await _loadAircraftRates();
   }
 
   async function _reloadGraph() {
@@ -294,7 +295,7 @@ window.App = (() => {
     if (!origin || !budget) return _toast('Fill origin and budget', 'error');
 
     try {
-      const advTimeLim = parseFloat(document.getElementById('adv-time').value) * 60;
+      const advTimeLim = parseFloat(document.getElementById('adv-time')?.value) * 60;
       const advBody = { origin, initial_budget: budget };
       if (isFinite(advTimeLim)) advBody.time_limit_min = advTimeLim;
       const res = await API.advancedStart(advBody);
@@ -698,6 +699,54 @@ window.App = (() => {
     `;
     document.querySelector('[data-tab="tab-report"]').click();
   }
+
+  // ── Aircraft rates ─────────────────────────────────────────────────────────
+
+  async function _loadAircraftRates() {
+    try {
+      const rates = await API.getAircraftRates();
+      _renderAircraftRatesForm(rates);
+    } catch(e) { /* silent on load failure */ }
+  }
+
+  function _renderAircraftRatesForm(rates) {
+    const el = document.getElementById('aircraft-rates-form');
+    if (!el) return;
+    el.innerHTML = Object.entries(rates).map(([name, r]) => {
+      const key = name.replace(/\s/g, '_');
+      return `<div style="margin-bottom:10px">
+        <div style="font-size:10px;font-weight:600;color:var(--text-dim);margin-bottom:4px">${name}</div>
+        <div style="display:flex;gap:8px">
+          <div class="field" style="margin:0;flex:1">
+            <label style="font-size:10px">$/km</label>
+            <input type="number" id="acr-${key}-cost" class="ac-rate-input"
+              step="0.001" min="0" value="${r.cost_per_km}"
+              data-aircraft="${name}" data-field="cost_per_km">
+          </div>
+          <div class="field" style="margin:0;flex:1">
+            <label style="font-size:10px">min/km</label>
+            <input type="number" id="acr-${key}-time" class="ac-rate-input"
+              step="0.01" min="0" value="${r.time_per_km}"
+              data-aircraft="${name}" data-field="time_per_km">
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  window.saveAircraftRates = async function() {
+    const rates = {};
+    document.querySelectorAll('.ac-rate-input').forEach(inp => {
+      const name  = inp.dataset.aircraft;
+      const field = inp.dataset.field;
+      if (!rates[name]) rates[name] = {};
+      rates[name][field] = parseFloat(inp.value);
+    });
+    try {
+      await API.putAircraftRates(rates);
+      _toast('Aircraft rates updated', 'success');
+    } catch(e) { _toast(e.message, 'error'); }
+  };
 
   // ── Toast ──────────────────────────────────────────────────────────────────
 
